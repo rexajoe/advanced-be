@@ -1,6 +1,7 @@
 import mysql from "mysql2";
 import dotenv from "dotenv";
 import bcrypt from "bcrypt";
+
 dotenv.config();
 
 const pool = mysql
@@ -24,25 +25,46 @@ export async function getUser(id) {
   return rows[0];
 }
 
-//create user
-export async function createUser(username, password, email) {
+//Register user
+export async function registerUser(fullname, username, password, email, token) {
   const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
   const [result] = await pool.query(
-    `INSERT INTO User (username, password, email) VALUES (?, ?, ?)`,
-    [username, hashedPassword, email]
+    `INSERT INTO User (fullname, username, password, email, token) VALUES (?, ?, ?, ?, ?)`,
+    [fullname, username, hashedPassword, email, token]
   );
   const id = result.insertId;
   return getUser(id);
 }
 
-//Update user
+//Login user
+export async function loginUser(email, password) {
+  const [rows] = await pool.query(
+    "SELECT user_id, username, password FROM User WHERE email = ?",
+    [email]
+  );
+  if (rows.length === 0) {
+    return null;
+  }
 
-export async function updateUser(userId, { username, password, email }) {
+  const user = rows[0];
+  const passwordMatch = await bcrypt.compare(password, user.password);
+  if (!passwordMatch) {
+    return null;
+  }
+  return { user_id: user.user_id, username: user.username };
+}
+
+//Update user
+export async function updateUser(
+  userId,
+  { fullname, username, password, email }
+) {
   const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
 
   const query = `
     UPDATE User
     SET
+      fullname = COALESCE(?, fullname),
       username = COALESCE(?, username),
       email = COALESCE(?, email),
       password = COALESCE(?, password)
@@ -50,6 +72,7 @@ export async function updateUser(userId, { username, password, email }) {
   `;
 
   const [result] = await pool.query(query, [
+    fullname,
     username,
     email,
     hashedPassword,
@@ -66,14 +89,54 @@ export async function deleteUser(userId) {
   return result;
 }
 
+//select all Movies
+export async function getMovie({ filter, sort, search }) {
+  let baseQuery = "SELECT * FROM Movie";
+  const queryParams = [];
+  const conditions = [];
+
+  if (filter) {
+    conditions.push("genre_id = ?");
+    queryParams.push(filter);
+  }
+
+  if (search) {
+    conditions.push("title LIKE ?");
+    queryParams.push(`%${search}%`);
+  }
+
+  if (conditions.length > 0) {
+    baseQuery += " WHERE " + conditions.join(" AND ");
+  }
+
+  if (sort) {
+    const validSortColumns = ["title", "release_date"];
+    const validSortDirection = ["asc", "desc"];
+    const sortParts = sort.split("_");
+    const column = sortParts.slice(0, -1).join("_");
+    const direction = sortParts[sortParts.length - 1];
+    if (validSortColumns.includes(column)) {
+      if (validSortDirection.includes(direction)) {
+        baseQuery += ` ORDER BY ${column} ${direction.toUpperCase()}`;
+      } else {
+        baseQuery += ` ORDER BY ${column} ASC`;
+      }
+    } else {
+      throw new Error("Invalid sort parameter");
+    }
+  }
+  const [rows] = await pool.query(baseQuery, queryParams);
+  return rows;
+}
+
 /********/
 
 //Get Users**//
 // const result = await getUsers();
 // console.log(result);
 
-//Create user**///
-// const result = await createUser("Rahmat", "123cdef", "rahmat@dummyemail.co.id");
+//Register user**///
+// const result = await registerUser("Rahmat", "123cdef", "rahmat@dummyemail.co.id");
 // console.log(result);
 
 //Update User**///
